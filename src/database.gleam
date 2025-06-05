@@ -1,64 +1,107 @@
-import gleam/list
-import gleam/dynamic/decode
-import gleam/erlang/node
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom.{type Atom}
+import gleam/erlang/node
+import gleam/list
+import gleam/result
 
 // BEAM interaction
 
-type TransactionResponse(a) {
-    Atomic(a)
-    Aborted(a)
+type Storage {
+  Set
 }
 
-type Attributes {
-    Attributes(List(Atom))
+type TableAttributes {
+  File(String)
+  Type(Storage)
+  Keypos(Int)
 }
 
-type AlreadyExists(a) {
-    AlreadyExists(a)
-}
+pub type TableRef(a)
 
-@external(erlang, "mnesia", "create_schema")
-fn raw_create_schema(nodes: List(node.Node)) -> Dynamic
+@external(erlang, "dets", "open_file")
+fn dets_open_file(
+  name: Atom,
+  att: List(TableAttributes),
+) -> Result(TableRef(a), reason)
 
-@external(erlang, "mnesia", "start")
-fn raw_start() -> Result(a, b)
+@external(erlang, "dets", "close")
+fn dets_close(tab: TableRef(a)) -> Result(b, c)
 
-@external(erlang, "mnesia", "create_table")
-fn raw_create_table(a: Atom, l: List(Attributes)) -> Dynamic
+@external(erlang, "dets", "insert")
+fn dets_insert(tab: TableRef(a), value: a) -> Result(b, c)
 
-@external(erlang, "mnesia", "transaction")
-fn raw_transaction(func: fn() -> a) -> TransactionResponse(a)
+@external(erlang, "dets", "delete")
+fn dets_delete(tab: TableRef(a), index: b) -> Result(b, c)
 
-@external(erlang, "mnesia", "write")
-fn raw_write(d: Dynamic) -> Atom
+@external(erlang, "dets", "lookup")
+fn dets_lookup(tab: TableRef(a), index: b) -> Result(List(a), c)
 
-@external(erlang, "mnesia", "read")
-fn raw_read(d: Dynamic) -> List(Dynamic)
-
-@external(erlang, "mnesia", "stop")
-fn raw_stop() -> Atom
-
+@external(erlang, "file", "delete")
+fn file_delete(path: String) -> a
 
 @external(erlang, "erlang", "element")
-fn erlang_element(at_index index: Int, in element: a) -> Dynamic
+fn erlang_element(index: Int, tuple: a) -> Atom
 
-// Type-safe (hopefully) API
+// Type-safe API
 
-pub fn start() -> Result(Nil, reason) {
-    let _ = raw_create_schema([node.self()]) // Error just means the schema is already created, so we can safely ignore it.
-    case raw_start() {
-        Ok(_) -> Ok(Nil)
-        Error(b) -> Error(b)
-    }
+pub opaque type Table(a) {
+  Table(tabname: Atom, attributes: List(TableAttributes), path: String)
 }
 
-pub fn create_table(sample sample: a, with_labels labels: List(String)) {
-    let at_table_name = erlang_element(1, sample) // Erlang arrays start a index 1
-    |> atom.from_dynamic
+pub fn create_table(
+  sample sample: a,
+  index_at keypos: Int,
+) -> Result(Table(a), reason) {
+  let at = erlang_element(1, sample)
+  let name = atom.to_string(at)
+  let path = "storage/" <> name <> ".dets"
 
-    let at_labels = list.map(labels, fn (label) { atom.create_from_string(label) })
-    raw_create_table(at_table_name, [Attributes(at_labels)])
+  let att = [File(path), Type(Set), Keypos(keypos + 2)]
+  // +2 because Erlang arrays start at 1 and the first value from our tuple will always be its atom
 
+  case dets_open_file(at, att) {
+    Ok(tab) -> {
+      case dets_close(tab) {
+        Error(reason) -> Error(reason)
+        Ok(_) -> Ok(Table(at, att, path))
+      }
+    }
+    Error(reason) -> Error(reason)
+  }
+}
+
+pub fn transaction(
+  table: Table(a),
+  procedure: fn(TableRef(a)) -> b,
+) -> Result(b, reason) {
+  case dets_open_file(table.tabname, table.attributes) {
+    Error(reason) -> Error(reason)
+    Ok(ref) -> {
+      let resp = procedure(ref)
+      dets_close(ref)
+      |> result.replace(resp)
+    }
+  }
+}
+
+pub fn insert(transac: TableRef(a), value: a) {
+  let _ = dets_insert(transac, value)
+  Nil
+}
+
+pub fn delete(transac: TableRef(a), index: b) {
+  let _ = dets_delete(transac, index)
+  Nil
+}
+
+pub fn select(transac: TableRef(a), index: b) -> Result(a, Nil) {
+  case dets_lookup(transac, index) {
+    Ok([resp]) -> Ok(resp)
+    _ -> Error(Nil)
+  }
+}
+
+pub fn drop_table(table: Table(a)) {
+  file_delete(table.path)
+  Nil
 }
