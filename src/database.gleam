@@ -1,6 +1,6 @@
 import gleam/erlang/atom.{type Atom}
-import gleam/result
 import gleam/erlang/charlist
+import gleam/result
 
 // BEAM interaction
 
@@ -43,7 +43,11 @@ fn erlang_element(index: Int, tuple: a) -> Atom
 // Type-safe API
 
 pub opaque type Table(a) {
-  Table(tabname: Atom, attributes: List(TableAttributes), path: charlist.Charlist)
+  Table(
+    tabname: Atom,
+    attributes: List(TableAttributes),
+    path: charlist.Charlist,
+  )
 }
 
 pub fn create_table(
@@ -85,17 +89,17 @@ pub fn transaction(
 }
 
 pub fn insert(transac: TableRef(a), value: a) {
-    case dets_insert(transac, value) {
-        Error(reason) -> Error(reason)
-        _ -> Ok(Nil)
-    }
+  case dets_insert(transac, value) {
+    Error(reason) -> Error(reason)
+    _ -> Ok(Nil)
+  }
 }
 
 pub fn delete(transac: TableRef(a), index: b) {
-    case dets_delete(transac, index) {
-        Error(reason) -> Error(reason)
-        _ -> Ok(Nil)
-    }
+  case dets_delete(transac, index) {
+    Error(reason) -> Error(reason)
+    _ -> Ok(Nil)
+  }
 }
 
 pub fn find(transac: TableRef(a), index: b) -> Result(a, Nil) {
@@ -106,9 +110,8 @@ pub fn find(transac: TableRef(a), index: b) -> Result(a, Nil) {
 }
 
 pub fn drop_table(table: Table(a)) {
-    case file_delete(table.path) {
-        Error(reason) -> Error(reason)
-        _ -> Ok(Nil)
-    }
+  case file_delete(table.path) {
+    Error(reason) -> Error(reason)
+    _ -> Ok(Nil)
+  }
 }
-
