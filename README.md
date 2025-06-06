@@ -1,4 +1,6 @@
-# database
+# Database
+
+A BEAM-native database that leverages on the power of DETS
 
 [![Package Version](https://img.shields.io/hexpm/v/database)](https://hex.pm/packages/database)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/database/)
