@@ -1,8 +1,6 @@
-import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom.{type Atom}
-import gleam/erlang/node
-import gleam/list
 import gleam/result
+import gleam/erlang/charlist
 
 // BEAM interaction
 
@@ -11,7 +9,7 @@ type Storage {
 }
 
 type TableAttributes {
-  File(String)
+  File(charlist.Charlist)
   Type(Storage)
   Keypos(Int)
 }
@@ -34,10 +32,10 @@ fn dets_insert(tab: TableRef(a), value: a) -> Result(b, c)
 fn dets_delete(tab: TableRef(a), index: b) -> Result(b, c)
 
 @external(erlang, "dets", "lookup")
-fn dets_lookup(tab: TableRef(a), index: b) -> Result(List(a), c)
+fn dets_lookup(tab: TableRef(a), index: b) -> List(a)
 
 @external(erlang, "file", "delete")
-fn file_delete(path: String) -> a
+fn file_delete(path: charlist.Charlist) -> a
 
 @external(erlang, "erlang", "element")
 fn erlang_element(index: Int, tuple: a) -> Atom
@@ -45,7 +43,7 @@ fn erlang_element(index: Int, tuple: a) -> Atom
 // Type-safe API
 
 pub opaque type Table(a) {
-  Table(tabname: Atom, attributes: List(TableAttributes), path: String)
+  Table(tabname: Atom, attributes: List(TableAttributes), path: charlist.Charlist)
 }
 
 pub fn create_table(
@@ -54,7 +52,7 @@ pub fn create_table(
 ) -> Result(Table(a), reason) {
   let at = erlang_element(1, sample)
   let name = atom.to_string(at)
-  let path = "storage/" <> name <> ".dets"
+  let path = charlist.from_string(name <> ".dets")
 
   let att = [File(path), Type(Set), Keypos(keypos + 2)]
   // +2 because Erlang arrays start at 1 and the first value from our tuple will always be its atom
@@ -63,7 +61,7 @@ pub fn create_table(
     Ok(tab) -> {
       case dets_close(tab) {
         Error(reason) -> Error(reason)
-        Ok(_) -> Ok(Table(at, att, path))
+        _ -> Ok(Table(at, att, path))
       }
     }
     Error(reason) -> Error(reason)
@@ -78,30 +76,39 @@ pub fn transaction(
     Error(reason) -> Error(reason)
     Ok(ref) -> {
       let resp = procedure(ref)
-      dets_close(ref)
-      |> result.replace(resp)
+      case dets_close(ref) {
+        Error(reason) -> Error(reason)
+        _ -> Ok(resp)
+      }
     }
   }
 }
 
 pub fn insert(transac: TableRef(a), value: a) {
-  let _ = dets_insert(transac, value)
-  Nil
+    case dets_insert(transac, value) {
+        Error(reason) -> Error(reason)
+        _ -> Ok(Nil)
+    }
 }
 
 pub fn delete(transac: TableRef(a), index: b) {
-  let _ = dets_delete(transac, index)
-  Nil
+    case dets_delete(transac, index) {
+        Error(reason) -> Error(reason)
+        _ -> Ok(Nil)
+    }
 }
 
-pub fn select(transac: TableRef(a), index: b) -> Result(a, Nil) {
+pub fn find(transac: TableRef(a), index: b) -> Result(a, Nil) {
   case dets_lookup(transac, index) {
-    Ok([resp]) -> Ok(resp)
+    [resp] -> Ok(resp)
     _ -> Error(Nil)
   }
 }
 
 pub fn drop_table(table: Table(a)) {
-  file_delete(table.path)
-  Nil
+    case file_delete(table.path) {
+        Error(reason) -> Error(reason)
+        _ -> Ok(Nil)
+    }
 }
+
