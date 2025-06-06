@@ -1,6 +1,6 @@
 name = "database"
-version = "1.0.0"
-description = "A BEAM-native data storage"
+version = "1.0.1"
+description = "A BEAM-native embedded data storage"
 
 licences = ["MIT"]
 repository = { type = "github", user = "R0DR160HM", repo = "database" }
