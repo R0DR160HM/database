@@ -1,6 +1,5 @@
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist
-import gleam/result
 
 // BEAM interaction
 
@@ -40,6 +39,15 @@ fn file_delete(path: charlist.Charlist) -> a
 @external(erlang, "erlang", "element")
 fn erlang_element(index: Int, tuple: a) -> Atom
 
+@external(erlang, "erlang", "is_tuple")
+fn erlang_is_tuple(tuple: a) -> Bool
+
+@external(erlang, "erlang", "is_atom")
+fn erlang_is_atom(atom: Atom) -> Bool
+
+@external(erlang, "erlang", "tuple_size")
+fn erlang_tuple_size(tuple: a) -> Int
+
 // Type-safe API
 
 pub opaque type Table(a) {
@@ -50,38 +58,53 @@ pub opaque type Table(a) {
   )
 }
 
+pub type TableError {
+  Badarg
+  UnableToOpen
+  UnableToClose
+}
+
 pub fn create_table(
   sample sample: a,
   index_at keypos: Int,
-) -> Result(Table(a), reason) {
-  let at = erlang_element(1, sample)
-  let name = atom.to_string(at)
-  let path = charlist.from_string(name <> ".dets")
+) -> Result(Table(a), TableError) {
+  case is_record(sample), keypos >= 0 {
+    True, True ->
+      case keypos + 2 > erlang_tuple_size(sample) {
+        True -> Error(Badarg)
+        False -> {
+          let at = erlang_element(1, sample)
+          let name = atom.to_string(at)
+          let path = charlist.from_string(name <> ".dets")
 
-  let att = [File(path), Type(Set), Keypos(keypos + 2)]
-  // +2 because Erlang arrays start at 1 and the first value from our tuple will always be its atom
+          let att = [File(path), Type(Set), Keypos(keypos + 2)]
+          // +2 because Erlang arrays start at 1 and the first value from our tuple will always be its atom
 
-  case dets_open_file(at, att) {
-    Ok(tab) -> {
-      case dets_close(tab) {
-        Error(reason) -> Error(reason)
-        _ -> Ok(Table(at, att, path))
+          case dets_open_file(at, att) {
+            Ok(tab) -> {
+              case dets_close(tab) {
+                Error(_) -> Error(UnableToClose)
+                _ -> Ok(Table(at, att, path))
+              }
+            }
+            Error(_) -> Error(UnableToOpen)
+          }
+        }
       }
-    }
-    Error(reason) -> Error(reason)
+    _, _ -> Error(Badarg)
   }
 }
 
 pub fn transaction(
   table: Table(a),
   procedure: fn(TableRef(a)) -> b,
-) -> Result(b, reason) {
+) -> Result(b, TableError) {
   case dets_open_file(table.tabname, table.attributes) {
-    Error(reason) -> Error(reason)
+    Error(_) -> Error(UnableToOpen)
     Ok(ref) -> {
       let resp = procedure(ref)
       case dets_close(ref) {
-        Error(reason) -> Error(reason)
+        Error(_) -> Error(UnableToClose)
         _ -> Ok(resp)
       }
     }
@@ -114,4 +137,8 @@ pub fn drop_table(table: Table(a)) {
     Error(reason) -> Error(reason)
     _ -> Ok(Nil)
   }
+}
+
+fn is_record(value: a) {
+  erlang_is_tuple(value) && erlang_is_atom(erlang_element(1, value))
 }

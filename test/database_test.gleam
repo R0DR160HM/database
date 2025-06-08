@@ -1,4 +1,4 @@
-import database
+import database.{Badarg}
 import gleeunit
 
 pub fn main() -> Nil {
@@ -9,7 +9,7 @@ pub type Person {
   Person(name: String, age: Int)
 }
 
-// gleeunit test functions end in `_test`
+/// Tests all public functions on their "happy path"
 pub fn full_cicle_test() {
   let sample = Person("Fernando Alonso", 18)
   let assert Ok(table) = database.create_table(sample, 0)
@@ -30,4 +30,16 @@ pub fn full_cicle_test() {
     })
 
   let assert Ok(_) = database.drop_table(table)
+}
+
+/// Tests whether the create_table function is type-safe
+pub fn tables_without_records_test() {
+    let assert Error(Badarg) = database.create_table("Person", 0)
+    let assert Error(Badarg) = database.create_table(1234, 0)
+    let assert Error(Badarg) = database.create_table(False, 0)
+    let assert Error(Badarg) = database.create_table(Person, 0)
+    let sample = Person("Socrates", 7)
+    let assert Error(Badarg) = database.create_table(sample, -1)
+    let assert Error(Badarg) = database.create_table(sample, 2)
+    let assert Ok(_) = database.create_table(sample, 0)
 }
