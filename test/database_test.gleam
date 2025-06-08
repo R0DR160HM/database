@@ -34,12 +34,14 @@ pub fn full_cicle_test() {
 
 /// Tests whether the create_table function is type-safe
 pub fn tables_without_records_test() {
-    let assert Error(Badarg) = database.create_table("Person", 0)
-    let assert Error(Badarg) = database.create_table(1234, 0)
-    let assert Error(Badarg) = database.create_table(False, 0)
-    let assert Error(Badarg) = database.create_table(Person, 0)
-    let sample = Person("Socrates", 7)
-    let assert Error(Badarg) = database.create_table(sample, -1)
-    let assert Error(Badarg) = database.create_table(sample, 2)
-    let assert Ok(_) = database.create_table(sample, 0)
+  let assert Error(Badarg) = database.create_table("Person", 0)
+  let assert Error(Badarg) = database.create_table(1234, 0)
+  let assert Error(Badarg) = database.create_table(False, 0)
+  let assert Error(Badarg) = database.create_table(Person, 0)
+  let sample = Person("Socrates", 7)
+  let assert Error(Badarg) = database.create_table(sample, -1)
+  let assert Error(Badarg) = database.create_table(sample, 2)
+  let assert Ok(t) = database.create_table(sample, 0)
+
+  let assert Ok(_) = database.drop_table(t)
 }
