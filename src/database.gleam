@@ -1,3 +1,15 @@
+//// An outrageously simple set of functions to interact with the BEAM
+//// DETS (Disk-based Erlang Term Storage) API.
+//// 
+//// Good for small projects and POCs.
+////
+////
+//// This project DOES NOT intend to serve as direct bindings to the 
+//// DETS API, but rather to interact with it in a gleamy way:
+////   1. with a simple and concise interface;
+////   2. type-safely;
+////   3. no unexpected crashes, all errors are values.
+
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist
 
@@ -13,6 +25,8 @@ type TableAttributes {
   Keypos(Int)
 }
 
+/// A reference to an open table, required to interact with said table.
+/// Obtained through the `transaction(Table)` function
 pub type TableRef(a)
 
 @external(erlang, "dets", "open_file")
@@ -50,6 +64,7 @@ fn erlang_tuple_size(tuple: a) -> Int
 
 // Type-safe API
 
+/// A collection of values used to access a DETS table.
 pub opaque type Table(a) {
   Table(
     tabname: Atom,
@@ -58,12 +73,37 @@ pub opaque type Table(a) {
   )
 }
 
+/// Possible error that may occur when using the library.
 pub type TableError {
+  /// The sample provided is not a Gleam record or
+  /// the index provided is not present within said record.
   Badarg
+
+  /// A problem occurred when trying to open and lock 
+  /// the .dets file.
   UnableToOpen
+
+  /// A problem ocurred when trying to write into the
+  /// .dets file and close it.
   UnableToClose
 }
 
+/// Creats a table.
+///
+/// If no .dets file exists for the provided sample, creates one.
+/// Otherwise, just checks whether the file is accessible and not
+/// corrupted.
+///
+/// # Example
+///
+/// ```gleam
+/// pub fn start_database() {
+///   let pluto = Pet(name: "Pluto", animal: Dog)
+///   database.create_table(sample: pluto, index_at: 0)
+///   // -> Ok(Table(Pet))
+/// }
+/// ```
+///
 pub fn create_table(
   sample sample: a,
   index_at keypos: Int,
@@ -95,6 +135,24 @@ pub fn create_table(
   }
 }
 
+/// Allows you to interact with the table.
+///
+/// It opens and locks the .dets file, then execute your operations.
+/// Once the operations are done, it writes the changes into the file,
+/// closes and releases it.
+///
+/// # Example
+///
+/// ```gleam
+/// pub fn is_pet_registered(table: Table(Pet), petname: String) {
+///   use ref <- database.transaction(table)
+///   case database.find(ref, petname) {
+///     Ok(_) -> True
+///     Error(Nil) -> False
+///   }
+/// }
+/// ```
+///
 pub fn transaction(
   table: Table(a),
   procedure: fn(TableRef(a)) -> b,
@@ -111,6 +169,27 @@ pub fn transaction(
   }
 }
 
+/// Inserts a value into a table.
+///
+/// DETS tables do not have support for update, only for upsert.
+/// So if you have to change a value, just insert a new value
+/// with the same index, and it will replace the previous value.
+///
+/// # Example
+///
+/// ```gleam
+/// pub fn new_pet(table: Table(Pet), animal: Animal, name: String) {
+///   let pet = Pet(name, animal)
+///   let op = database.transaction(table, fn(ref) {
+///     database.insert(ref, pet)
+///   })
+///   case op {
+///     Ok(_) -> Ok(pet)
+///     Error(reason) -> Error(reason)
+///   }
+/// }
+/// ```
+///
 pub fn insert(transac: TableRef(a), value: a) {
   case dets_insert(transac, value) {
     Error(reason) -> Error(reason)
@@ -118,6 +197,17 @@ pub fn insert(transac: TableRef(a), value: a) {
   }
 }
 
+/// Deletes a value from a table.
+///
+/// # Example
+///
+/// ```gleam
+/// pub fn delete_pet(table: Table(Pet) petname: String) {
+///   use ref <- database.transaction(table)
+///   database.delete(ref, petname)
+/// }
+/// ```
+///
 pub fn delete(transac: TableRef(a), index: b) {
   case dets_delete(transac, index) {
     Error(reason) -> Error(reason)
@@ -125,6 +215,21 @@ pub fn delete(transac: TableRef(a), index: b) {
   }
 }
 
+/// Finds a value by its index
+///
+/// # Example
+///
+/// ```gleam
+/// pub fn play_with_pluto(table: Table(Pet)) {
+///   use ref <- database.transaction(table)
+///   let resp = database.find(ref, "Pluto")
+///   case resp {
+///     Error(_) -> Error(PlutoNotFoundBlameTheAstronomers)
+///     Ok(pluto) -> Ok(play_with(pluto))
+///   }
+/// }
+/// ```
+///
 pub fn find(transac: TableRef(a), index: b) -> Result(a, Nil) {
   case dets_lookup(transac, index) {
     [resp] -> Ok(resp)
@@ -132,6 +237,22 @@ pub fn find(transac: TableRef(a), index: b) -> Result(a, Nil) {
   }
 }
 
+/// Deletes de entire table file
+///
+/// # Example
+///
+/// ```gleam
+/// pub fn destroy_all_pets(table: Table(Pet), password: String) {
+///   case password {
+///     "Yes, I am evil." -> {
+///       database.drop(table)
+///       Ok(Nil)
+///     }
+///     _ -> Error(WrongPassword)
+///   }
+/// }
+/// ```
+///
 pub fn drop_table(table: Table(a)) {
   case file_delete(table.path) {
     Error(reason) -> Error(reason)
