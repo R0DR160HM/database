@@ -245,7 +245,7 @@ pub fn find(transac: TableRef(a), index: b) -> Result(a, Nil) {
 /// pub fn destroy_all_pets(table: Table(Pet), password: String) {
 ///   case password {
 ///     "Yes, I am evil." -> {
-///       database.drop(table)
+///       database.drop_table(table)
 ///       Ok(Nil)
 ///     }
 ///     _ -> Error(WrongPassword)
