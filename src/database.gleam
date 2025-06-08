@@ -10,11 +10,11 @@
 ////   2. type-safely;
 ////   3. no unexpected crashes, all errors are values.
 
-import gleam/string
-import gleam/crypto
 import gleam/bit_array
+import gleam/crypto
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist
+import gleam/string
 
 // BEAM interaction
 
@@ -122,8 +122,9 @@ pub fn create_table(
         True -> Error(Badarg)
         False -> {
           let original_atom = erlang_element(1, sample)
-          let name = atom.to_string(original_atom) <> "_" <> generate_signature(sample)
-            let new_atom = atom.create_from_string(name)
+          let name =
+            atom.to_string(original_atom) <> "_" <> generate_signature(sample)
+          let new_atom = atom.create_from_string(name)
 
           let path = charlist.from_string(name <> ".dets")
 
@@ -147,9 +148,9 @@ pub fn create_table(
 
 /// Ensures type-safety cryptographically
 fn generate_signature(for value: a) {
-    <<string.inspect(value):utf8>>
-    |> crypto.hash(crypto.Sha256, _)
-    |> bit_array.base64_url_encode(False)
+  <<string.inspect(value):utf8>>
+  |> crypto.hash(crypto.Sha256, _)
+  |> bit_array.base64_url_encode(False)
 }
 
 /// Allows you to interact with the table.
