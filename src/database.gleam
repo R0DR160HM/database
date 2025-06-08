@@ -10,6 +10,9 @@
 ////   2. type-safely;
 ////   3. no unexpected crashes, all errors are values.
 
+import gleam/string
+import gleam/crypto
+import gleam/bit_array
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist
 
@@ -90,6 +93,11 @@ pub type TableError {
 
 /// Creats a table.
 ///
+/// ## Important
+/// **THE TABLE IS ENTIRELY DEPENDENT ON THE SAMPLE PROVIDED,
+/// ANY CHANGE TO SMAPLE - EVENT IF EVERYTHING REMAINS OF THE SAME
+/// TYPE - WILL CAUSE ANOTHER TABLE TO BE CREATED.**
+///
 /// If no .dets file exists for the provided sample, creates one.
 /// Otherwise, just checks whether the file is accessible and not
 /// corrupted.
@@ -113,18 +121,20 @@ pub fn create_table(
       case keypos + 2 > erlang_tuple_size(sample) {
         True -> Error(Badarg)
         False -> {
-          let at = erlang_element(1, sample)
-          let name = atom.to_string(at)
+          let original_atom = erlang_element(1, sample)
+          let name = atom.to_string(original_atom) <> "_" <> generate_signature(sample)
+            let new_atom = atom.create_from_string(name)
+
           let path = charlist.from_string(name <> ".dets")
 
           let att = [File(path), Type(Set), Keypos(keypos + 2)]
           // +2 because Erlang arrays start at 1 and the first value from our tuple will always be its atom
 
-          case dets_open_file(at, att) {
+          case dets_open_file(new_atom, att) {
             Ok(tab) -> {
               case dets_close(tab) {
                 Error(_) -> Error(UnableToClose)
-                _ -> Ok(Table(at, att, path))
+                _ -> Ok(Table(new_atom, att, path))
               }
             }
             Error(_) -> Error(UnableToOpen)
@@ -133,6 +143,13 @@ pub fn create_table(
       }
     _, _ -> Error(Badarg)
   }
+}
+
+/// Ensures type-safety cryptographically
+fn generate_signature(for value: a) {
+    <<string.inspect(value):utf8>>
+    |> crypto.hash(crypto.Sha256, _)
+    |> bit_array.base64_url_encode(False)
 }
 
 /// Allows you to interact with the table.
