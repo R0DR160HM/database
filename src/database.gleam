@@ -14,6 +14,7 @@ import gleam/bit_array
 import gleam/crypto
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist
+import gleam/option
 import gleam/string
 
 // BEAM interaction
@@ -78,9 +79,12 @@ pub opaque type Table(a) {
 
 /// Possible error that may occur when using the library.
 pub type TableError {
-  /// The sample provided is not a Gleam record or
-  /// the index provided is not present within said record.
+  /// The definition provided is not a Gleam record or
   Badarg
+
+  /// The index provided for the primary_key is lower
+  /// than 0 or higher than the record size
+  IndexOutOfBounds
 
   /// A problem occurred when trying to open and lock 
   /// the .dets file.
@@ -94,11 +98,11 @@ pub type TableError {
 /// Creats a table.
 ///
 /// ## Important
-/// **THE TABLE IS ENTIRELY DEPENDENT ON THE SAMPLE PROVIDED,
-/// ANY CHANGE TO SMAPLE - EVENT IF EVERYTHING REMAINS OF THE SAME
+/// **THE TABLE IS ENTIRELY DEPENDENT ON THE DEFINITION PROVIDED,
+/// ANY CHANGE TO DEFINITION - EVEN IF EVERYTHING REMAINS OF THE SAME
 /// TYPE - WILL CAUSE ANOTHER TABLE TO BE CREATED.**
 ///
-/// If no .dets file exists for the provided sample, creates one.
+/// If no .dets file exists for the provided definition, creates one.
 /// Otherwise, just checks whether the file is accessible and not
 /// corrupted.
 ///
@@ -107,23 +111,25 @@ pub type TableError {
 /// ```gleam
 /// pub fn start_database() {
 ///   let pluto = Pet(name: "Pluto", animal: Dog)
-///   database.create_table(sample: pluto, index_at: 0)
+///   database.create_table(definition: pluto, index_at: 0)
 ///   // -> Ok(Table(Pet))
 /// }
 /// ```
 ///
 pub fn create_table(
-  sample sample: a,
+  definition definition: a,
   index_at keypos: Int,
 ) -> Result(Table(a), TableError) {
-  case is_record(sample), keypos >= 0 {
+  case is_record(definition), keypos >= 0 {
     True, True ->
-      case keypos + 2 > erlang_tuple_size(sample) {
-        True -> Error(Badarg)
+      case keypos + 2 > erlang_tuple_size(definition) {
+        True -> Error(IndexOutOfBounds)
         False -> {
-          let original_atom = erlang_element(1, sample)
+          let original_atom = erlang_element(1, definition)
           let name =
-            atom.to_string(original_atom) <> "_" <> generate_signature(sample)
+            atom.to_string(original_atom)
+            <> "_"
+            <> generate_signature(definition)
           let new_atom = atom.create_from_string(name)
 
           let path = charlist.from_string(name <> ".dets")
@@ -142,7 +148,8 @@ pub fn create_table(
           }
         }
       }
-    _, _ -> Error(Badarg)
+    False, _ -> Error(Badarg)
+    _, False -> Error(IndexOutOfBounds)
   }
 }
 
@@ -165,8 +172,8 @@ fn generate_signature(for value: a) {
 /// pub fn is_pet_registered(table: Table(Pet), petname: String) {
 ///   use ref <- database.transaction(table)
 ///   case database.find(ref, petname) {
-///     Ok(_) -> True
-///     Error(Nil) -> False
+///     Some(_) -> True
+///     None -> False
 ///   }
 /// }
 /// ```
@@ -242,16 +249,16 @@ pub fn delete(transac: TableRef(a), index: b) {
 ///   use ref <- database.transaction(table)
 ///   let resp = database.find(ref, "Pluto")
 ///   case resp {
-///     Error(_) -> Error(PlutoNotFoundBlameTheAstronomers)
-///     Ok(pluto) -> Ok(play_with(pluto))
+///     None -> Error(PlutoNotFoundBlameTheAstronomers)
+///     Some(pluto) -> Ok(play_with(pluto))
 ///   }
 /// }
 /// ```
 ///
-pub fn find(transac: TableRef(a), index: b) -> Result(a, Nil) {
+pub fn find(transac: TableRef(a), index: b) -> option.Option(a) {
   case dets_lookup(transac, index) {
-    [resp] -> Ok(resp)
-    _ -> Error(Nil)
+    [resp] -> option.Some(resp)
+    _ -> option.None
   }
 }
 
