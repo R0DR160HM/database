@@ -1,5 +1,5 @@
 name = "database"
-version = "1.1.0"
+version = "1.1.1"
 description = "A BEAM-native embedded data storage"
 
 licences = ["MIT"]
