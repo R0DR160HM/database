@@ -54,4 +54,27 @@ pub fn direct_operations_test() {
     database.transaction(table, database.insert(_, Person("Your mom™", 2048)))
   let assert Ok(Some(Person("Your mom™", 2048))) =
     database.transaction(table, database.find(_, "Your mom™"))
+  let assert Ok(_) = database.drop_table(table)
+}
+
+pub fn avoid_table_colision_test() {
+  let assert Ok(t1) = database.create_table(definition, 0)
+  let _ =
+    database.transaction(t1, fn(ref) {
+      database.insert(ref, Person("Person", 50))
+    })
+
+  let other_definition = Person("Nome", 2)
+  let assert Ok(t2) = database.create_table(other_definition, 0)
+  let assert Ok(None) =
+    database.transaction(t2, fn(ref) { database.find(ref, "Person") })
+
+  let same_definition = Person("Nome", 1)
+  let assert Ok(t3) = database.create_table(same_definition, 0)
+  let assert Ok(Some(Person("Person", 50))) =
+    database.transaction(t3, fn(ref) { database.find(ref, "Person") })
+
+  let assert Ok(_) = database.drop_table(t1)
+  let assert Ok(_) = database.drop_table(t2)
+  let assert Error(_) = database.drop_table(t3)
 }
