@@ -262,7 +262,7 @@ pub fn find(transac: TableRef(a), index: b) -> option.Option(a) {
   }
 }
 
-/// Deletes de entire table file
+/// Deletes the entire table file
 ///
 /// # Example
 ///
