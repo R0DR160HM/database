@@ -17,8 +17,9 @@ type Music {
 }
 
 // The generated table will be entirely based on this definition,
-// and any change to the definition will create a different table.
-// So make sure the type fits all your requirements before makint
+// and any change to the definition will casue a different table
+// to be created.
+// So make sure the type fits all your requirements before making
 // a table out of it.
 const music_table_def = Music(name: "Music name", year: 0000)
 
