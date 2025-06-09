@@ -51,6 +51,9 @@ fn dets_delete(tab: TableRef(a), index: b) -> Result(b, c)
 @external(erlang, "dets", "lookup")
 fn dets_lookup(tab: TableRef(a), index: b) -> List(a)
 
+@external(erlang, "dets", "traverse")
+fn dets_traverse(tab: TableRef(a), select_fn: fn(a) -> SelectOption(b)) -> List(b)
+
 @external(erlang, "file", "delete")
 fn file_delete(path: charlist.Charlist) -> a
 
@@ -65,6 +68,11 @@ fn erlang_is_atom(atom: Atom) -> Bool
 
 @external(erlang, "erlang", "tuple_size")
 fn erlang_tuple_size(tuple: a) -> Int
+
+// Forgive me Father, for I have lied
+// on the return type
+@external(erlang, "erlang", "binary_to_atom")
+fn erlang_binary_to_atom(value: String) -> SelectOption(a)
 
 // Type-safe API
 
@@ -288,3 +296,29 @@ pub fn drop_table(table: Table(a)) {
 fn is_record(value: a) {
   erlang_is_tuple(value) && erlang_is_atom(erlang_element(1, value))
 }
+
+/// Operations to perform on a select query.
+///
+/// **Skip** - Ignores the current value
+/// **Continue(value)** - Adds the value to the return list
+/// **Done(value)** - Adds the value to the return list
+/// and immediately returns the query.
+pub type SelectOption(value) {
+    Skip
+    Continue(value)
+    Done(value)
+}
+
+pub fn select(transac: TableRef(a), select_fn: fn(a) -> SelectOption(b)) -> List(b) {
+    let continue = erlang_binary_to_atom("continue")
+    let new_fn = fn(value: a) {
+        case select_fn(value) {
+            Skip -> continue 
+            res -> res
+        }
+    }
+    dets_traverse(transac, new_fn)
+}
+
+
+// Ad maiorem Dei gloriam

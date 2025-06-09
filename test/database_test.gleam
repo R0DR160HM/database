@@ -78,3 +78,26 @@ pub fn avoid_table_colision_test() {
   let assert Ok(_) = database.drop_table(t2)
   let assert Error(_) = database.drop_table(t3)
 }
+
+pub fn select_test() {
+    let assert Ok(table) = database.create_table(definition, 0)
+
+
+    let assert Ok(_) = database.insert(ref, Person("João", 23))
+    let assert Ok(_) = database.insert(ref, Person("Someone very old", 101))
+    let assert Ok(_) = database.insert(ref, Person("Maria", 55))
+    let assert Ok(_) = database.insert(ref, Person("Not Maria", 56))
+
+    let assert Ok([
+        Person("João", 23),
+        Person("Maria", 55)
+    ]) = database.transaction(table, fn(ref) {
+        database.select(ref, fn(value) {
+            case value {
+                Person("João", _) -> database.Continue(value)
+                Person(_, age) if age < 100 && age > 50 -> database.Done(value)
+                _ -> database.Skip
+            }
+        })
+    })
+}   
