@@ -79,7 +79,7 @@ pub opaque type Table(a) {
 
 /// Possible error that may occur when using the library.
 pub type TableError {
-  /// The definition provided is not a Gleam record or
+  /// The definition provided is not a Gleam record 
   Badarg
 
   /// The index provided for the primary_key is lower
