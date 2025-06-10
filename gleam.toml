@@ -1,5 +1,5 @@
 name = "database"
-version = "2.0.1"
+version = "2.0.2"
 description = "A very gleamy embedded data storage"
 
 licences = ["MIT"]

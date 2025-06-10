@@ -23,7 +23,7 @@ type Music {
 fn music_decoder() {
   use name <- database.field(0, decode.string)
   use release_year <- database.field(1, decode.int)
-  decode.success(Music(name: release_year))
+  decode.success(Music(name:, release_year:))
 }
 
 const music_table_def = Music(name: "Music name", year: 0000)
