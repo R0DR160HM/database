@@ -26,11 +26,6 @@ fn music_decoder() {
   decode.success(Music(name: release_year))
 }
 
-// The generated table will be entirely based on this definition,
-// and any change to the definition will casue a different table
-// to be created.
-// So make sure the type fits all your requirements before making
-// a table out of it.
 const music_table_def = Music(name: "Music name", year: 0000)
 
 pub fn main() -> Nil {
