@@ -52,7 +52,10 @@ fn dets_delete(tab: TableRef(a), index: b) -> Result(b, c)
 fn dets_lookup(tab: TableRef(a), index: b) -> List(a)
 
 @external(erlang, "dets", "traverse")
-fn dets_traverse(tab: TableRef(a), select_fn: fn(a) -> SelectOption(b)) -> List(b)
+fn dets_traverse(
+  tab: TableRef(a),
+  select_fn: fn(a) -> SelectOption(b),
+) -> List(b)
 
 @external(erlang, "file", "delete")
 fn file_delete(path: charlist.Charlist) -> a
@@ -69,8 +72,8 @@ fn erlang_is_atom(atom: Atom) -> Bool
 @external(erlang, "erlang", "tuple_size")
 fn erlang_tuple_size(tuple: a) -> Int
 
-// Forgive me Father, for I have lied
-// on the return type
+// Lying about the type ouput here is the only
+// way to ensure type-safety on the `select` function
 @external(erlang, "erlang", "binary_to_atom")
 fn erlang_binary_to_atom(value: String) -> SelectOption(a)
 
@@ -298,27 +301,50 @@ fn is_record(value: a) {
 }
 
 /// Operations to perform on a select query.
-///
-/// **Skip** - Ignores the current value
-/// **Continue(value)** - Adds the value to the return list
-/// **Done(value)** - Adds the value to the return list
-/// and immediately returns the query.
 pub type SelectOption(value) {
-    Skip
-    Continue(value)
-    Done(value)
+
+  /// Ignores the current value.
+  Skip
+
+  /// Adds the value to the return list.
+  Continue(value)
+
+  /// Adds the value to the return list
+  /// and immediately returns the query.
+  Done(value)
 }
 
-pub fn select(transac: TableRef(a), select_fn: fn(a) -> SelectOption(b)) -> List(b) {
-    let continue = erlang_binary_to_atom("continue")
-    let new_fn = fn(value: a) {
-        case select_fn(value) {
-            Skip -> continue 
-            res -> res
-        }
+/// Searches for somethig on the table
+///
+/// # Example
+/// 
+/// ```gleam
+/// pub fn fetch_all_parrots(table: Table(Pet)) {
+///   use ref <- database.transaction(table)
+///   use value <- database.select(ref)
+///   case value {
+///     Pet(_name, Parrot) -> Continue(value)
+///     _ -> Skip
+///   }
+/// }
+/// ```
+///
+/// # IMPORTANT
+/// **DETS tables are not sorted in any deterministic way, so
+/// never assume that the last value inserted will be the last
+/// one the table
+///
+pub fn select(
+  transac: TableRef(a),
+  select_fn: fn(a) -> SelectOption(b),
+) -> List(b) {
+  let continue = erlang_binary_to_atom("continue")
+  let new_fn = fn(value: a) {
+    case select_fn(value) {
+      Skip -> continue
+      res -> res
     }
-    dets_traverse(transac, new_fn)
+  }
+  dets_traverse(transac, new_fn)
 }
-
-
 // Ad maiorem Dei gloriam

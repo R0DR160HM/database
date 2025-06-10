@@ -80,24 +80,34 @@ pub fn avoid_table_colision_test() {
 }
 
 pub fn select_test() {
-    let assert Ok(table) = database.create_table(definition, 0)
+  let assert Ok(table) = database.create_table(definition, 0)
 
-
-    let assert Ok(_) = database.insert(ref, Person("João", 23))
-    let assert Ok(_) = database.insert(ref, Person("Someone very old", 101))
-    let assert Ok(_) = database.insert(ref, Person("Maria", 55))
-    let assert Ok(_) = database.insert(ref, Person("Not Maria", 56))
-
-    let assert Ok([
-        Person("João", 23),
-        Person("Maria", 55)
-    ]) = database.transaction(table, fn(ref) {
-        database.select(ref, fn(value) {
-            case value {
-                Person("João", _) -> database.Continue(value)
-                Person(_, age) if age < 100 && age > 50 -> database.Done(value)
-                _ -> database.Skip
-            }
-        })
+  let _ =
+    database.transaction(table, fn(ref) {
+      let assert Ok(_) = database.insert(ref, Person("João", 23))
+      let assert Ok(_) = database.insert(ref, Person("Someone very old", 101))
+      let assert Ok(_) = database.insert(ref, Person("Maria", 55))
+      let assert Ok(_) = database.insert(ref, Person("Not Maria", 56))
     })
-}   
+
+  let assert Ok([_, _]) =
+    database.transaction(table, fn(ref) {
+      database.select(ref, fn(value) {
+        case value {
+          Person("João", _) -> database.Continue(value)
+          Person(_, 55) -> database.Continue(value)
+          _ -> database.Skip
+        }
+      })
+    })
+
+  let assert Ok([_]) =
+    database.transaction(table, fn(ref) {
+      database.select(ref, fn(value) {
+        case value {
+          Person(_, age) if age > 50 && age < 60 -> database.Done(value)
+          _ -> database.Skip
+        }
+      })
+    })
+}

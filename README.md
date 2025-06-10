@@ -41,9 +41,20 @@ pub fn main() -> Nil {
     let assert Ok(Nil) = database.delete(ref, "The Rains of Castemere")
   })
 
+  // You can find elements by their primary_key...
   let _ = database.transaction(table, fn(ref) {
     let assert option.None = database.find(ref, "The Rains of Castemere")
     let assert option.Some(Music("Templars", 2025)) = database.find(ref, "Templars")
+  })
+
+  // [...] or by complex queries
+  let assert Ok([_, _]) = database.transaction(table, fn(ref) {
+    database.select(ref, fn(value) {
+      case value {
+        Music(_, year) if year > 2000 -> database.Continue(value)
+        _ -> database.Skip
+      }
+    })
   })
 }
 ```
