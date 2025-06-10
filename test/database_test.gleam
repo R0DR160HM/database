@@ -1,4 +1,5 @@
-import database.{Badarg, IndexOutOfBounds}
+import database.{Badarg}
+import gleam/dynamic/decode
 import gleam/option.{None, Some}
 import gleeunit
 
@@ -10,11 +11,17 @@ pub type Person {
   Person(name: String, age: Int)
 }
 
+fn decoder() {
+  use name <- database.field(0, decode.string)
+  use age <- database.field(1, decode.int)
+  decode.success(Person(name:, age:))
+}
+
 const definition = Person("Nome", 1)
 
 /// Tests all public functions on their "happy path"
 pub fn full_cicle_test() {
-  let assert Ok(table) = database.create_table(definition, 0)
+  let assert Ok(table) = database.create_table(definition, decoder())
 
   let _ =
     database.transaction(table, fn(ref) {
@@ -36,20 +43,17 @@ pub fn full_cicle_test() {
 
 /// Tests whether the create_table function is type-safe
 pub fn tables_without_records_test() {
-  let assert Error(Badarg) = database.create_table("Person", 0)
-  let assert Error(Badarg) = database.create_table(1234, 0)
-  let assert Error(Badarg) = database.create_table(False, 0)
-  let assert Error(Badarg) = database.create_table(Person, 0)
+  let assert Error(Badarg) = database.create_table("Person", decode.string)
+  let assert Error(Badarg) = database.create_table(1234, decode.int)
+  let assert Error(Badarg) = database.create_table(False, decode.bool)
   let sample = Person("Socrates", 7)
-  let assert Error(IndexOutOfBounds) = database.create_table(sample, -1)
-  let assert Error(IndexOutOfBounds) = database.create_table(sample, 2)
-  let assert Ok(t) = database.create_table(sample, 0)
+  let assert Ok(t) = database.create_table(sample, decoder())
 
   let assert Ok(_) = database.drop_table(t)
 }
 
 pub fn direct_operations_test() {
-  let assert Ok(table) = database.create_table(definition:, index_at: 0)
+  let assert Ok(table) = database.create_table(definition:, decode_with: decoder())
   let assert Ok(_) =
     database.transaction(table, database.insert(_, Person("Your mom™", 2048)))
   let assert Ok(Some(Person("Your mom™", 2048))) =
@@ -57,30 +61,8 @@ pub fn direct_operations_test() {
   let assert Ok(_) = database.drop_table(table)
 }
 
-pub fn avoid_table_colision_test() {
-  let assert Ok(t1) = database.create_table(definition, 0)
-  let _ =
-    database.transaction(t1, fn(ref) {
-      database.insert(ref, Person("Person", 50))
-    })
-
-  let other_definition = Person("Nome", 2)
-  let assert Ok(t2) = database.create_table(other_definition, 0)
-  let assert Ok(None) =
-    database.transaction(t2, fn(ref) { database.find(ref, "Person") })
-
-  let same_definition = Person("Nome", 1)
-  let assert Ok(t3) = database.create_table(same_definition, 0)
-  let assert Ok(Some(Person("Person", 50))) =
-    database.transaction(t3, fn(ref) { database.find(ref, "Person") })
-
-  let assert Ok(_) = database.drop_table(t1)
-  let assert Ok(_) = database.drop_table(t2)
-  let assert Error(_) = database.drop_table(t3)
-}
-
 pub fn select_test() {
-  let assert Ok(table) = database.create_table(definition, 0)
+  let assert Ok(table) = database.create_table(definition, decoder())
 
   let _ =
     database.transaction(table, fn(ref) {
@@ -110,4 +92,6 @@ pub fn select_test() {
         }
       })
     })
+
+  database.drop_table(table)
 }

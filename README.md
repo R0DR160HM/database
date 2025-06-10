@@ -11,9 +11,19 @@ gleam add database
 ```gleam
 import database
 import gleam/option
+import gleam/dynamic/decode
 
 type Music {
-  Music(name: String, release_year: String)
+  // The first value of the custom type will always
+  // be its primary_key, so if you want a specific value,
+  // make sure to make it the first value.
+  Music(name: String, release_year: Int)
+}
+
+fn music_decoder() {
+  use name <- database.field(0, decode.string)
+  use release_year <- database.field(1, decode.int)
+  decode.success(Music(name: release_year))
 }
 
 // The generated table will be entirely based on this definition,
@@ -24,10 +34,9 @@ type Music {
 const music_table_def = Music(name: "Music name", year: 0000)
 
 pub fn main() -> Nil {
-  // 0 indicates that the table primary_key is the 0th value (name)
   let assert Ok(table) = database.create_table(
     definition: music_table_def, 
-    index_at: 0)
+    decode_with: music_decoder())
 
   // All interactions with the table happen within a transaction
   let assert Ok(Nil) = database.transaction(table, fn(ref) {

@@ -10,12 +10,11 @@
 ////   2. type-safely;
 ////   3. no unexpected crashes, all errors are values.
 
-import gleam/bit_array
-import gleam/crypto
+import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist
 import gleam/option
-import gleam/string
 
 // BEAM interaction
 
@@ -29,9 +28,13 @@ type TableAttributes {
   Keypos(Int)
 }
 
+type TableRef(a)
+
 /// A reference to an open table, required to interact with said table.
 /// Obtained through the `transaction(Table)` function
-pub type TableRef(a)
+pub opaque type Transaction(a) {
+  Transaction(ref: TableRef(a), decoder: decode.Decoder(a))
+}
 
 @external(erlang, "dets", "open_file")
 fn dets_open_file(
@@ -49,12 +52,12 @@ fn dets_insert(tab: TableRef(a), value: a) -> Result(b, c)
 fn dets_delete(tab: TableRef(a), index: b) -> Result(b, c)
 
 @external(erlang, "dets", "lookup")
-fn dets_lookup(tab: TableRef(a), index: b) -> List(a)
+fn dets_lookup(tab: TableRef(a), index: b) -> List(dynamic.Dynamic)
 
 @external(erlang, "dets", "traverse")
 fn dets_traverse(
   tab: TableRef(a),
-  select_fn: fn(a) -> SelectOption(b),
+  select_fn: fn(dynamic.Dynamic) -> SelectOption(b),
 ) -> List(b)
 
 @external(erlang, "file", "delete")
@@ -85,6 +88,7 @@ pub opaque type Table(a) {
     tabname: Atom,
     attributes: List(TableAttributes),
     path: charlist.Charlist,
+    decoder: decode.Decoder(a),
   )
 }
 
@@ -92,10 +96,6 @@ pub opaque type Table(a) {
 pub type TableError {
   /// The definition provided is not a Gleam record 
   Badarg
-
-  /// The index provided for the primary_key is lower
-  /// than 0 or higher than the record size
-  IndexOutOfBounds
 
   /// A problem occurred when trying to open and lock 
   /// the .dets file.
@@ -121,54 +121,47 @@ pub type TableError {
 ///
 /// ```gleam
 /// pub fn start_database() {
-///   let pluto = Pet(name: "Pluto", animal: Dog)
-///   database.create_table(definition: pluto, index_at: 0)
+///   let table_def = Pet(name: "Pluto", animal: Dog)
+///   let decoder = {
+///     use name <- database.field(0, decode.string)
+///     use animal <- database.field(1, my_animal_decoder)
+///     decode.success(Pet(name:, animal:))
+///   }
+///   database.create_table(definition: table_def, decode_with: decoder)
 ///   // -> Ok(Table(Pet))
 /// }
 /// ```
 ///
 pub fn create_table(
   definition definition: a,
-  index_at keypos: Int,
+  decode_with decoder: decode.Decoder(a),
 ) -> Result(Table(a), TableError) {
-  case is_record(definition), keypos >= 0 {
-    True, True ->
-      case keypos + 2 > erlang_tuple_size(definition) {
-        True -> Error(IndexOutOfBounds)
+  case is_record(definition) {
+    True ->
+      case erlang_tuple_size(definition) < 2 {
+        True -> Error(Badarg)
         False -> {
-          let original_atom = erlang_element(1, definition)
-          let name =
-            atom.to_string(original_atom)
-            <> "_"
-            <> generate_signature(definition)
-          let new_atom = atom.create_from_string(name)
+          let name_atom = erlang_element(1, definition)
+          let name = atom.to_string(name_atom)
 
           let path = charlist.from_string(name <> ".dets")
 
-          let att = [File(path), Type(Set), Keypos(keypos + 2)]
-          // +2 because Erlang arrays start at 1 and the first value from our tuple will always be its atom
+          let att = [File(path), Type(Set), Keypos(2)]
+          // 2 because Erlang arrays start at 1 and the first value from our tuple will always be its atom
 
-          case dets_open_file(new_atom, att) {
+          case dets_open_file(name_atom, att) {
             Ok(tab) -> {
               case dets_close(tab) {
                 Error(_) -> Error(UnableToClose)
-                _ -> Ok(Table(new_atom, att, path))
+                _ -> Ok(Table(name_atom, att, path, decoder))
               }
             }
             Error(_) -> Error(UnableToOpen)
           }
         }
       }
-    False, _ -> Error(Badarg)
-    _, False -> Error(IndexOutOfBounds)
+    False -> Error(Badarg)
   }
-}
-
-/// Ensures type-safety cryptographically
-fn generate_signature(for value: a) {
-  <<string.inspect(value):utf8>>
-  |> crypto.hash(crypto.Sha256, _)
-  |> bit_array.base64_url_encode(False)
 }
 
 /// Allows you to interact with the table.
@@ -191,12 +184,12 @@ fn generate_signature(for value: a) {
 ///
 pub fn transaction(
   table: Table(a),
-  procedure: fn(TableRef(a)) -> b,
+  procedure: fn(Transaction(a)) -> b,
 ) -> Result(b, TableError) {
   case dets_open_file(table.tabname, table.attributes) {
     Error(_) -> Error(UnableToOpen)
     Ok(ref) -> {
-      let resp = procedure(ref)
+      let resp = procedure(Transaction(ref, table.decoder))
       case dets_close(ref) {
         Error(_) -> Error(UnableToClose)
         _ -> Ok(resp)
@@ -226,8 +219,8 @@ pub fn transaction(
 /// }
 /// ```
 ///
-pub fn insert(transac: TableRef(a), value: a) {
-  case dets_insert(transac, value) {
+pub fn insert(transac: Transaction(a), value: a) {
+  case dets_insert(transac.ref, value) {
     Error(reason) -> Error(reason)
     _ -> Ok(Nil)
   }
@@ -244,8 +237,8 @@ pub fn insert(transac: TableRef(a), value: a) {
 /// }
 /// ```
 ///
-pub fn delete(transac: TableRef(a), index: b) {
-  case dets_delete(transac, index) {
+pub fn delete(transac: Transaction(a), index: b) {
+  case dets_delete(transac.ref, index) {
     Error(reason) -> Error(reason)
     _ -> Ok(Nil)
   }
@@ -266,9 +259,13 @@ pub fn delete(transac: TableRef(a), index: b) {
 /// }
 /// ```
 ///
-pub fn find(transac: TableRef(a), index: b) -> option.Option(a) {
-  case dets_lookup(transac, index) {
-    [resp] -> option.Some(resp)
+pub fn find(transac: Transaction(a), index: b) -> option.Option(a) {
+  case dets_lookup(transac.ref, index) {
+    [resp] ->
+      case decode.run(resp, transac.decoder) {
+        Ok(val) -> option.Some(val)
+        _ -> option.None
+      }
     _ -> option.None
   }
 }
@@ -335,16 +332,41 @@ pub type SelectOption(value) {
 /// one on the table.**
 ///
 pub fn select(
-  transac: TableRef(a),
+  transac: Transaction(a),
   select_fn: fn(a) -> SelectOption(b),
 ) -> List(b) {
   let continue = erlang_binary_to_atom("continue")
-  let new_fn = fn(value: a) {
-    case select_fn(value) {
-      Skip -> continue
-      res -> res
+  let new_fn = fn(dyn_value) {
+    case decode.run(dyn_value, transac.decoder) {
+      Ok(value) ->
+        case select_fn(value) {
+          Skip -> continue
+          res -> res
+        }
+      _ -> continue
     }
   }
-  dets_traverse(transac, new_fn)
+  dets_traverse(transac.ref, new_fn)
+}
+
+/// Field decoder
+/// 
+/// # Example
+/// 
+/// ```gleam
+/// let decoder = {
+///   use name <- database.field(0, decode.string)
+///   use animal <- database.field(1, my_animal_decoder)
+///   decode.success(Pet(name:, animal:))
+/// }
+/// ```
+///
+pub fn field(
+  field_index: Int,
+  field_decoder: decode.Decoder(t),
+  next: fn(t) -> decode.Decoder(final),
+) {
+  // +1 to avoid the atomic name at the start of the tuple
+  decode.field(field_index + 1, field_decoder, next)
 }
 // Ad maiorem Dei gloriam
