@@ -53,7 +53,8 @@ pub fn tables_without_records_test() {
 }
 
 pub fn direct_operations_test() {
-  let assert Ok(table) = database.create_table(definition:, decode_with: decoder())
+  let assert Ok(table) =
+    database.create_table(definition:, decode_with: decoder())
   let assert Ok(_) =
     database.transaction(table, database.insert(_, Person("Your mom™", 2048)))
   let assert Ok(Some(Person("Your mom™", 2048))) =
