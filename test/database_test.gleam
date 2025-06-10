@@ -101,11 +101,11 @@ pub fn select_test() {
       })
     })
 
-  let assert Ok([_]) =
+  let assert Ok([Person("João", 23)]) =
     database.transaction(table, fn(ref) {
       database.select(ref, fn(value) {
         case value {
-          Person(_, age) if age > 50 && age < 60 -> database.Done(value)
+          Person("João", _) -> database.Done(value)
           _ -> database.Skip
         }
       })
