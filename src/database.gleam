@@ -314,7 +314,7 @@ pub type SelectOption(value) {
   Done(value)
 }
 
-/// Searches for somethig on the table
+/// Searches for somethig on the table.
 ///
 /// # Example
 /// 
@@ -332,7 +332,7 @@ pub type SelectOption(value) {
 /// # IMPORTANT
 /// **DETS tables are not sorted in any deterministic way, so
 /// never assume that the last value inserted will be the last
-/// one the table
+/// one the table.**
 ///
 pub fn select(
   transac: TableRef(a),
