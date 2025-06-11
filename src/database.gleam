@@ -109,9 +109,7 @@ pub type TableError {
 /// Creats a table.
 ///
 /// ## Important
-/// **THE TABLE IS ENTIRELY DEPENDENT ON THE DEFINITION PROVIDED,
-/// ANY CHANGE TO DEFINITION - EVEN IF EVERYTHING REMAINS OF THE SAME
-/// TYPE - WILL CAUSE ANOTHER TABLE TO BE CREATED.**
+/// **The table created will have the same name as definition provided.**
 ///
 /// If no .dets file exists for the provided definition, creates one.
 /// Otherwise, just checks whether the file is accessible and not
