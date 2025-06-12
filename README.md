@@ -26,36 +26,36 @@ fn music_decoder() {
   decode.success(Music(name:, release_year:))
 }
 
-const music_table_def = Music(name: "Music name", year: 0000)
-
 pub fn main() -> Nil {
   let assert Ok(table) = database.create_table(
-    definition: music_table_def, 
+    name: "musics", 
     decode_with: music_decoder())
 
   // All interactions with the table happen within a transaction
-  let assert Ok(Nil) = database.transaction(table, fn(ref) {
-    database.insert(ref, Music("The Rains of Castemere", 2019))
+  let assert Ok(castemere_id) = database.transaction(table, fn(ref) {
+    let assert Ok(id) = database.insert(ref, Music("The Rains of Castemere", 2019))
+    id
   })
 
   // You can do multiple operations within the same transaction, as long as they don't interact with each other
-  let _ = database.transaction(table, fn(ref) {
-    let assert Ok(Nil) = database.insert(ref, Music("Templars", 2025))
-    let assert Ok(Nil) = database.insert(ref, Music("Kids", 2009))
-    let assert Ok(Nil) = database.delete(ref, "The Rains of Castemere")
+  let assert Ok(templars_id) = database.transaction(table, fn(ref) {
+    let assert Ok(id) = database.insert(ref, Music("Templars", 2025))
+    let assert Ok(_) = database.insert(ref, Music("Kids", 2009))
+    let assert Ok(Nil) = database.delete(ref, castemere_id)
+    id
   })
 
   // You can find elements by their primary_key...
   let _ = database.transaction(table, fn(ref) {
-    let assert option.None = database.find(ref, "The Rains of Castemere")
-    let assert option.Some(Music("Templars", 2025)) = database.find(ref, "Templars")
+    let assert option.None = database.find(ref, castemere_id)
+    let assert option.Some(Music("Templars", 2025)) = database.find(ref, templars_id)
   })
 
   // [...] or by complex queries
   let assert Ok([_, _]) = database.transaction(table, fn(ref) {
     database.select(ref, fn(value) {
       case value {
-        Music(_, year) if year > 2000 -> database.Continue(value)
+        #(_id, Music(_name, year)) if year > 2000 -> database.Continue(value)
         _ -> database.Skip
       }
     })

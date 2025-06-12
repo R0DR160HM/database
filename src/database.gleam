@@ -10,6 +10,8 @@
 ////   2. type-safely;
 ////   3. no unexpected crashes, all errors are values.
 
+import gleam/bit_array
+import gleam/crypto
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
@@ -33,7 +35,7 @@ type TableRef(a)
 /// A reference to an open table, required to interact with said table.
 /// Obtained through the `transaction(Table)` function
 pub opaque type Transaction(a) {
-  Transaction(ref: TableRef(a), decoder: decode.Decoder(a))
+  Transaction(ref: TableRef(#(String, a)), decoder: decode.Decoder(a))
 }
 
 @external(erlang, "dets", "open_file")
@@ -52,28 +54,16 @@ fn dets_insert(tab: TableRef(a), value: a) -> Result(b, c)
 fn dets_delete(tab: TableRef(a), index: b) -> Result(b, c)
 
 @external(erlang, "dets", "lookup")
-fn dets_lookup(tab: TableRef(a), index: b) -> List(dynamic.Dynamic)
+fn dets_lookup(tab: TableRef(a), index: b) -> List(#(String, dynamic.Dynamic))
 
 @external(erlang, "dets", "traverse")
 fn dets_traverse(
   tab: TableRef(a),
-  select_fn: fn(dynamic.Dynamic) -> SelectOption(b),
+  select_fn: fn(#(String, dynamic.Dynamic)) -> SelectOption(b),
 ) -> List(b)
 
 @external(erlang, "file", "delete")
 fn file_delete(path: charlist.Charlist) -> a
-
-@external(erlang, "erlang", "element")
-fn erlang_element(index: Int, tuple: a) -> Atom
-
-@external(erlang, "erlang", "is_tuple")
-fn erlang_is_tuple(tuple: a) -> Bool
-
-@external(erlang, "erlang", "is_atom")
-fn erlang_is_atom(atom: Atom) -> Bool
-
-@external(erlang, "erlang", "tuple_size")
-fn erlang_tuple_size(tuple: a) -> Int
 
 // Lying about the type ouput here is the only
 // way to ensure type-safety on the `select` function
@@ -93,10 +83,7 @@ pub opaque type Table(a) {
 }
 
 /// Possible error that may occur when using the library.
-pub type TableError {
-  /// The definition provided is not a Gleam record 
-  Badarg
-
+pub type FileError {
   /// A problem occurred when trying to open and lock 
   /// the .dets file.
   UnableToOpen
@@ -108,9 +95,6 @@ pub type TableError {
 
 /// Creats a table.
 ///
-/// ## Important
-/// **The table created will have the same name as definition provided.**
-///
 /// If no .dets file exists for the provided definition, creates one.
 /// Otherwise, just checks whether the file is accessible and not
 /// corrupted.
@@ -119,46 +103,34 @@ pub type TableError {
 ///
 /// ```gleam
 /// pub fn start_database() {
-///   let table_def = Pet(name: "Pluto", animal: Dog)
 ///   let decoder = {
 ///     use name <- database.field(0, decode.string)
 ///     use animal <- database.field(1, my_animal_decoder)
 ///     decode.success(Pet(name:, animal:))
 ///   }
-///   database.create_table(definition: table_def, decode_with: decoder)
+///   database.create_table(name: "pets", decode_with: decoder)
 ///   // -> Ok(Table(Pet))
 /// }
 /// ```
 ///
 pub fn create_table(
-  definition definition: a,
+  name name: String,
   decode_with decoder: decode.Decoder(a),
-) -> Result(Table(a), TableError) {
-  case is_record(definition) {
-    True ->
-      case erlang_tuple_size(definition) < 2 {
-        True -> Error(Badarg)
-        False -> {
-          let name_atom = erlang_element(1, definition)
-          let name = atom.to_string(name_atom)
+) -> Result(Table(a), FileError) {
+  let name_atom = atom.create_from_string(name)
 
-          let path = charlist.from_string(name <> ".dets")
+  let path = charlist.from_string(name <> ".dets")
 
-          let att = [File(path), Type(Set), Keypos(2)]
-          // 2 because Erlang arrays start at 1 and the first value from our tuple will always be its atom
+  let att = [File(path), Type(Set), Keypos(1)]
 
-          case dets_open_file(name_atom, att) {
-            Ok(tab) -> {
-              case dets_close(tab) {
-                Error(_) -> Error(UnableToClose)
-                _ -> Ok(Table(name_atom, att, path, decoder))
-              }
-            }
-            Error(_) -> Error(UnableToOpen)
-          }
-        }
+  case dets_open_file(name_atom, att) {
+    Ok(tab) -> {
+      case dets_close(tab) {
+        Error(_) -> Error(UnableToClose)
+        _ -> Ok(Table(name_atom, att, path, decoder))
       }
-    False -> Error(Badarg)
+    }
+    Error(_) -> Error(UnableToOpen)
   }
 }
 
@@ -171,9 +143,9 @@ pub fn create_table(
 /// # Example
 ///
 /// ```gleam
-/// pub fn is_pet_registered(table: Table(Pet), petname: String) {
+/// pub fn is_pet_registered(table: Table(Pet), pet_id: String) {
 ///   use ref <- database.transaction(table)
-///   case database.find(ref, petname) {
+///   case database.find(ref, pet_id) {
 ///     Some(_) -> True
 ///     None -> False
 ///   }
@@ -183,7 +155,7 @@ pub fn create_table(
 pub fn transaction(
   table: Table(a),
   procedure: fn(Transaction(a)) -> b,
-) -> Result(b, TableError) {
+) -> Result(b, FileError) {
   case dets_open_file(table.tabname, table.attributes) {
     Error(_) -> Error(UnableToOpen)
     Ok(ref) -> {
@@ -196,7 +168,7 @@ pub fn transaction(
   }
 }
 
-/// Inserts a value into a table.
+/// Inserts a value into a table and return their generated id.
 ///
 /// DETS tables do not have support for update, only for upsert.
 /// So if you have to change a value, just insert a new value
@@ -205,22 +177,18 @@ pub fn transaction(
 /// # Example
 ///
 /// ```gleam
-/// pub fn new_pet(table: Table(Pet), animal: Animal, name: String) {
+/// pub fn new_pet(table: Table(Pet), animal: Animal, name: String) -> String {
 ///   let pet = Pet(name, animal)
-///   let op = database.transaction(table, fn(ref) {
-///     database.insert(ref, pet)
-///   })
-///   case op {
-///     Ok(_) -> Ok(pet)
-///     Error(reason) -> Error(reason)
-///   }
+///   use ref <- database.transaction(table)
+///   database.insert(ref, pet)  
 /// }
 /// ```
 ///
 pub fn insert(transac: Transaction(a), value: a) {
-  case dets_insert(transac.ref, value) {
+  let id = crypto.strong_random_bytes(16) |> bit_array.base64_url_encode(False)
+  case dets_insert(transac.ref, #(id, value)) {
     Error(reason) -> Error(reason)
-    _ -> Ok(Nil)
+    _ -> Ok(id)
   }
 }
 
@@ -229,14 +197,14 @@ pub fn insert(transac: Transaction(a), value: a) {
 /// # Example
 ///
 /// ```gleam
-/// pub fn delete_pet(table: Table(Pet) petname: String) {
+/// pub fn delete_pet(table: Table(Pet) pet_id: String) {
 ///   use ref <- database.transaction(table)
-///   database.delete(ref, petname)
+///   database.delete(ref, pet_id)
 /// }
 /// ```
 ///
-pub fn delete(transac: Transaction(a), index: b) {
-  case dets_delete(transac.ref, index) {
+pub fn delete(transac: Transaction(a), id: String) {
+  case dets_delete(transac.ref, id) {
     Error(reason) -> Error(reason)
     _ -> Ok(Nil)
   }
@@ -249,7 +217,7 @@ pub fn delete(transac: Transaction(a), index: b) {
 /// ```gleam
 /// pub fn play_with_pluto(table: Table(Pet)) {
 ///   use ref <- database.transaction(table)
-///   let resp = database.find(ref, "Pluto")
+///   let resp = database.find(ref, known_pluto_id)
 ///   case resp {
 ///     None -> Error(PlutoNotFoundBlameTheAstronomers)
 ///     Some(pluto) -> Ok(play_with(pluto))
@@ -257,9 +225,9 @@ pub fn delete(transac: Transaction(a), index: b) {
 /// }
 /// ```
 ///
-pub fn find(transac: Transaction(a), index: b) -> option.Option(a) {
-  case dets_lookup(transac.ref, index) {
-    [resp] ->
+pub fn find(transac: Transaction(a), id: String) -> option.Option(a) {
+  case dets_lookup(transac.ref, id) {
+    [#(_, resp)] ->
       case decode.run(resp, transac.decoder) {
         Ok(val) -> option.Some(val)
         _ -> option.None
@@ -291,10 +259,6 @@ pub fn drop_table(table: Table(a)) {
   }
 }
 
-fn is_record(value: a) {
-  erlang_is_tuple(value) && erlang_is_atom(erlang_element(1, value))
-}
-
 /// Operations to perform on a select query.
 pub type SelectOption(value) {
 
@@ -318,7 +282,7 @@ pub type SelectOption(value) {
 ///   use ref <- database.transaction(table)
 ///   use value <- database.select(ref)
 ///   case value {
-///     Pet(_name, Parrot) -> Continue(value)
+///     #(_id, Pet(_name, Parrot)) -> Continue(value)
 ///     _ -> Skip
 ///   }
 /// }
@@ -331,13 +295,14 @@ pub type SelectOption(value) {
 ///
 pub fn select(
   transac: Transaction(a),
-  select_fn: fn(a) -> SelectOption(b),
+  select_fn: fn(#(String, a)) -> SelectOption(b),
 ) -> List(b) {
   let continue = erlang_binary_to_atom("continue")
-  let new_fn = fn(dyn_value) {
+  let new_fn = fn(tab_value) {
+    let #(id, dyn_value) = tab_value
     case decode.run(dyn_value, transac.decoder) {
       Ok(value) ->
-        case select_fn(value) {
+        case select_fn(#(id, value)) {
           Skip -> continue
           res -> res
         }

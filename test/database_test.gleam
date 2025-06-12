@@ -1,4 +1,6 @@
-import database.{Badarg}
+import database
+import gleam/bit_array
+import gleam/crypto
 import gleam/dynamic/decode
 import gleam/option.{None, Some}
 import gleeunit
@@ -17,53 +19,46 @@ fn decoder() {
   decode.success(Person(name:, age:))
 }
 
-const definition = Person("Nome", 1)
-
 /// Tests all public functions on their "happy path"
 pub fn full_cicle_test() {
-  let assert Ok(table) = database.create_table(definition, decoder())
+  let assert Ok(table) = database.create_table("people", decoder())
 
-  let _ =
+  let piastri_id =
+    crypto.strong_random_bytes(16) |> bit_array.base64_url_encode(False)
+
+  let assert Ok([vettel_id, _verstappen_id]) =
     database.transaction(table, fn(ref) {
-      let assert Ok(Nil) = database.insert(ref, Person("Sebastian Vettel", 87))
-      let assert Ok(Nil) = database.insert(ref, Person("Max Verstappen", 29))
+      let assert Ok(vettel_id) =
+        database.insert(ref, Person("Sebastian Vettel", 87))
+      let assert Ok(verstappen_id) =
+        database.insert(ref, Person("Max Verstappen", 29))
+      [vettel_id, verstappen_id]
     })
 
   let _ =
     database.transaction(table, fn(ref) {
-      let assert None = database.find(ref, "Oscar Piastri")
+      let assert None = database.find(ref, piastri_id)
       let assert Some(Person("Sebastian Vettel", 87)) =
-        database.find(ref, "Sebastian Vettel")
-      let assert Ok(Nil) = database.delete(ref, "Sebastian Vettel")
-      let assert None = database.find(ref, "Sebastian Vettel")
+        database.find(ref, vettel_id)
+      let assert Ok(Nil) = database.delete(ref, vettel_id)
+      let assert None = database.find(ref, vettel_id)
     })
 
   let assert Ok(_) = database.drop_table(table)
-}
-
-/// Tests whether the create_table function is type-safe
-pub fn tables_without_records_test() {
-  let assert Error(Badarg) = database.create_table("Person", decode.string)
-  let assert Error(Badarg) = database.create_table(1234, decode.int)
-  let assert Error(Badarg) = database.create_table(False, decode.bool)
-  let sample = Person("Socrates", 7)
-  let assert Ok(t) = database.create_table(sample, decoder())
-
-  let assert Ok(_) = database.drop_table(t)
 }
 
 pub fn direct_operations_test() {
   let assert Ok(table) =
-    database.create_table(definition:, decode_with: decoder())
-  let assert Ok(_) =
+    database.create_table(name: "people", decode_with: decoder())
+  let assert Ok(Ok(mom_id)) =
     database.transaction(table, database.insert(_, Person("Your mom™", 2048)))
   let assert Ok(Some(Person("Your mom™", 2048))) =
-    database.transaction(table, database.find(_, "Your mom™"))
+    database.transaction(table, database.find(_, mom_id))
   let assert Ok(_) = database.drop_table(table)
 }
 
 pub fn select_test() {
-  let assert Ok(table) = database.create_table(definition, decoder())
+  let assert Ok(table) = database.create_table("people", decoder())
 
   let _ =
     database.transaction(table, fn(ref) {
@@ -77,22 +72,45 @@ pub fn select_test() {
     database.transaction(table, fn(ref) {
       database.select(ref, fn(value) {
         case value {
-          Person("João", _) -> database.Continue(value)
-          Person(_, 55) -> database.Continue(value)
+          #(_, Person("João", _)) -> database.Continue(value)
+          #(_, Person(_, 55)) -> database.Continue(value)
           _ -> database.Skip
         }
       })
     })
 
-  let assert Ok([Person("João", 23)]) =
+  let assert Ok([#(_, Person("João", 23))]) =
     database.transaction(table, fn(ref) {
       database.select(ref, fn(value) {
         case value {
-          Person("João", _) -> database.Done(value)
+          #(_, Person("João", _)) -> database.Done(value)
           _ -> database.Skip
         }
       })
     })
 
   database.drop_table(table)
+}
+
+pub fn full_cicle_with_string_test() {
+  let assert Ok(table) = database.create_table("testsss", decode.string)
+
+  let _ = database.transaction(table, database.insert(_, "brbr patapim"))
+  let assert Ok([id]) =
+    database.transaction(table, fn(ref) {
+      use value <- database.select(ref)
+      case value {
+        #(id, "brbr patapim") -> database.Done(id)
+        _ -> database.Skip
+      }
+    })
+
+  let assert Ok(option.Some("brbr patapim")) =
+    database.transaction(table, database.find(_, id))
+
+  let assert Ok(Ok(Nil)) = database.transaction(table, database.delete(_, id))
+
+  let assert Ok(option.None) = database.transaction(table, database.find(_, id))
+
+  let assert Ok(Nil) = database.drop_table(table)
 }
