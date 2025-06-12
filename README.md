@@ -14,9 +14,6 @@ import gleam/option
 import gleam/dynamic/decode
 
 type Music {
-  // The first value of the custom type will always
-  // be its primary_key, so if you want a specific value,
-  // make sure to make it the first value.
   Music(name: String, release_year: Int)
 }
 
