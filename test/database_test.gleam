@@ -114,3 +114,4 @@ pub fn full_cicle_with_string_test() {
 
   let assert Ok(Nil) = database.drop_table(table)
 }
+

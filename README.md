@@ -49,15 +49,18 @@ pub fn main() -> Nil {
   })
 
   // [...] or by complex queries
-  let assert Ok([_, _]) = database.transaction(table, fn(ref) {
-    database.select(ref, fn(value) {
-      case value {
-        #(_id, Music(_name, year)) if year > 2000 -> database.Continue(value)
-        _ -> database.Skip
-      }
-    })
-  })
+  let assert Ok([_, _]) = select_musics_after_2000(table)
 }
+
+fn select_musics_after_2000(table: database.Table(Music)) {
+  use transaction <- database.transaction(table)
+  use value <- database.select(transaction)
+  case value {
+    #(_id, Music(_name, year)) if year > 2000 -> database.Continue(value)
+    _ -> database.Skip
+  }
+}
+
 ```
 
 Further documentation can be found at <https://hexdocs.pm/database>.
