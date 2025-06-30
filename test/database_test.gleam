@@ -2,7 +2,9 @@ import database
 import gleam/bit_array
 import gleam/crypto
 import gleam/dynamic/decode
+import gleam/int
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit
 
 pub fn main() -> Nil {
@@ -115,3 +117,49 @@ pub fn full_cicle_with_string_test() {
   let assert Ok(Nil) = database.drop_table(table)
 }
 
+pub fn migration_test() {
+  let assert Ok(table) = database.create_table("people", decode.string)
+  let assert Ok(_) = {
+    use transac <- database.transaction(table)
+    let _ = database.insert(transac, "Aristotle, 22")
+    let _ = database.insert(transac, "Plato, 42")
+    let _ = database.insert(transac, "Socrates, 23")
+    let _ = database.insert(transac, "Aquinas, the GOAT")
+  }
+
+  let assert Ok(table) = database.create_table("people", decoder())
+
+  let string_to_person_decoder = {
+    use decoded_string <- decode.then(decode.string)
+    case string.split(decoded_string, ", ") {
+      [name, age] ->
+        case int.parse(age) {
+          Ok(age) -> decode.success(Person(name, age))
+          _ -> decode.failure(Person("", 0), "int")
+        }
+      _ -> decode.failure(Person("", 0), "Name, age")
+    }
+  }
+  let assert Ok(_) = {
+    use value <- database.migrate(table)
+    case decode.run(value, string_to_person_decoder) {
+      Ok(person) -> database.Update(person)
+      _ -> database.Delete
+    }
+  }
+
+  // length 3 because Aquinas was not migrated
+  let assert Ok([_, _, _]) = {
+    use transac <- database.transaction(table)
+    use #(_id, person) <- database.select(transac)
+    case person {
+      Person("Aristotle", 22) -> database.Continue(person)
+      Person("Plato", 42) -> database.Continue(person)
+      Person("Socrates", 23) -> database.Continue(person)
+      Person("Aquinas", _) -> database.Continue(person)
+      _ -> database.Skip
+    }
+  }
+
+  let assert Ok(Nil) = database.drop_table(table)
+}

@@ -312,6 +312,68 @@ pub fn select(
   dets_traverse(transac.ref, new_fn)
 }
 
+/// Operations to perform on a select query.
+pub type MigrateOptions(a) {
+
+  /// Replaces the previous value with the new one.
+  Update(a)
+
+  /// Maintains the value as it currently is.
+  ///
+  /// Keep in mind that if the value does not conform
+  /// to the provided decoder, it will be unaccessible
+  /// for both `find` and `select` functions.
+  /// Only remaining stored for future migrations.
+  Keep
+
+  /// Removes the value from the table.
+  Delete
+}
+
+/// Migrates the table to a new structure.
+/// When the type stored in the table changes, this function
+/// allows you to update the table to the new structure.
+///
+/// # IMPORTANT
+/// **To avoid conflicts, this function will start its own
+/// transaction, so you should not use it inside another.**
+///
+/// # Example
+///
+/// ```gleam
+/// pub fn migrate_pets(table: Table(Pet)) {
+///   use value <- database.migrate(table)
+///   case decode.run(value, my_pet_decoder()) {
+///     Ok(pet) -> Update(pet)
+///     _ -> Delete
+///   } 
+/// }
+/// ```
+/// 
+pub fn migrate(
+  table: Table(a),
+  migration: fn(dynamic.Dynamic) -> MigrateOptions(a),
+) -> Result(Nil, FileError) {
+  use transac <- transaction(table)
+  let continue = erlang_binary_to_atom("continue")
+  let func = fn(tab_value) {
+    let #(id, dyn_value) = tab_value
+    case migration(dyn_value) {
+      Update(new_value) -> {
+        let _ = dets_insert(transac.ref, #(id, new_value))
+        continue
+      }
+      Delete -> {
+        let _ = dets_delete(transac.ref, id)
+        continue
+      }
+      Keep -> continue
+    }
+  }
+  let _ = dets_traverse(transac.ref, func)
+  Nil
+}
+
 /// Field decoder
 /// 
 /// # Example
