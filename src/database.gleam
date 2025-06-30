@@ -312,7 +312,7 @@ pub fn select(
   dets_traverse(transac.ref, new_fn)
 }
 
-/// Operations to perform on a select query.
+/// Operations to perform on a migration.
 pub type MigrateOptions(a) {
 
   /// Replaces the previous value with the new one.
