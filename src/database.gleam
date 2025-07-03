@@ -117,7 +117,7 @@ pub fn create_table(
   name name: String,
   decode_with decoder: decode.Decoder(a),
 ) -> Result(Table(a), FileError) {
-  let name_atom = atom.create_from_string(name)
+  let name_atom = atom.create(name)
 
   let path = charlist.from_string(name <> ".dets")
 
@@ -187,7 +187,7 @@ pub fn transaction(
 pub fn insert(transac: Transaction(a), value: a) {
   let id = crypto.strong_random_bytes(16) |> bit_array.base64_url_encode(False)
   case dets_insert(transac.ref, #(id, value)) {
-    Error(reason) -> Error(reason)
+    Error(_) -> Error(Nil)
     _ -> Ok(id)
   }
 }
@@ -205,7 +205,7 @@ pub fn insert(transac: Transaction(a), value: a) {
 ///
 pub fn delete(transac: Transaction(a), id: String) {
   case dets_delete(transac.ref, id) {
-    Error(reason) -> Error(reason)
+    Error(_) -> Error(Nil)
     _ -> Ok(Nil)
   }
 }
@@ -254,7 +254,7 @@ pub fn find(transac: Transaction(a), id: String) -> option.Option(a) {
 ///
 pub fn drop_table(table: Table(a)) {
   case file_delete(table.path) {
-    Error(reason) -> Error(reason)
+    Error(_) -> Error(Nil)
     _ -> Ok(Nil)
   }
 }
