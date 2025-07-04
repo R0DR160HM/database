@@ -163,3 +163,69 @@ pub fn migration_test() {
 
   let assert Ok(Nil) = database.drop_table(table)
 }
+
+pub fn update_test() {
+  let assert Ok(table) = database.create_table("people", decoder())
+  let assert Ok(Ok(id)) = {
+    use transac <- database.transaction(table)
+    database.insert(transac, Person("Rony Weasley", 11))
+  }
+  let assert Ok(_) = {
+    use transac <- database.transaction(table)
+    database.update(transac, id, Person("Percy Weasley", 14))
+  }
+
+  let assert Ok(Error(Nil)) = {
+    use transac <- database.transaction(table)
+    database.update(transac, "wrong_id", Person("Gina Weasley", 10))
+  }
+
+  let assert Ok(Some(Person("Percy Weasley", 14))) = {
+    use transac <- database.transaction(table)
+    database.find(transac, id)
+  }
+
+  let assert Ok([Person("Percy Weasley", 14)]) = {
+    use transac <- database.transaction(table)
+    use value <- database.select(transac)
+    database.Continue(value.1)
+  }
+
+  let assert Ok(Nil) = database.drop_table(table)
+}
+
+pub type Animal {
+  Dog
+  Cat
+  Parrot
+}
+
+pub type Pet {
+  Pet(name: String, animal: Animal)
+}
+
+pub fn enum_test() {
+  let pet_decoder = {
+    use name <- database.field(0, decode.string)
+    use animal <- database.field(1, database.enum([Dog, Cat, Parrot], Dog))
+    decode.success(Pet(name:, animal:))
+  }
+  let assert Ok(table) = database.create_table("pets", pet_decoder)
+
+  let assert Ok([dog_id, cat_id, parrot_id]) = {
+    use transac <- database.transaction(table)
+    let assert Ok(dog_id) = database.insert(transac, Pet("Bob", Dog))
+    let assert Ok(cat_id) = database.insert(transac, Pet("Alice", Cat))
+    let assert Ok(parrot_id) = database.insert(transac, Pet("Charlie", Parrot))
+    [dog_id, cat_id, parrot_id]
+  }
+
+  let assert Ok(_) = {
+    use transac <- database.transaction(table)
+    let assert Some(Pet("Bob", Dog)) = database.find(transac, dog_id)
+    let assert Some(Pet("Alice", Cat)) = database.find(transac, cat_id)
+    let assert Some(Pet("Charlie", Parrot)) = database.find(transac, parrot_id)
+  }
+
+  let assert Ok(Nil) = database.drop_table(table)
+}

@@ -16,6 +16,7 @@ import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist
+import gleam/list
 import gleam/option
 
 // BEAM interaction
@@ -64,6 +65,9 @@ fn dets_traverse(
 
 @external(erlang, "file", "delete")
 fn file_delete(path: charlist.Charlist) -> a
+
+@external(erlang, "database_ffi", "compare")
+fn ffi_compare(a: a, b: b) -> Bool
 
 // Lying about the type ouput here is the only
 // way to ensure type-safety on the `select` function
@@ -170,10 +174,6 @@ pub fn transaction(
 
 /// Inserts a value into a table and return their generated id.
 ///
-/// DETS tables do not have support for update, only for upsert.
-/// So if you have to change a value, just insert a new value
-/// with the same index, and it will replace the previous value.
-///
 /// # Example
 ///
 /// ```gleam
@@ -189,6 +189,29 @@ pub fn insert(transac: Transaction(a), value: a) {
   case dets_insert(transac.ref, #(id, value)) {
     Error(_) -> Error(Nil)
     _ -> Ok(id)
+  }
+}
+
+/// Updates a value in a table.
+///
+/// # Example
+///
+/// ```gleam
+/// pub fn rename_pet(table: Table(Pet) id: String, pet: Pet, new_name: String) {
+///   use transac <- database.transaction(table)
+///   let pet = Pet(new_name, pet.animal)
+///   database.update(transac, id, pet)
+/// }
+/// ```
+///
+pub fn update(transac: Transaction(a), id: String, value: a) {
+  case dets_lookup(transac.ref, id) {
+    [_] ->
+      case dets_insert(transac.ref, #(id, value)) {
+        Error(_) -> Error(Nil)
+        _ -> Ok(id)
+      }
+    _ -> Error(Nil)
   }
 }
 
@@ -393,5 +416,25 @@ pub fn field(
 ) {
   // +1 to avoid the atomic name at the start of the tuple
   decode.field(field_index + 1, field_decoder, next)
+}
+
+/// Enum decoder
+/// 
+/// # Example
+/// 
+/// ```gleam
+/// let decoder = {
+///   use name <- database.field(0, decode.string)
+///   use animal <- database.field(1, database.enum([Dog, Cat, Parrot], Dog))
+///   decode.success(Pet(name:, animal:))
+/// }
+/// ```
+///
+pub fn enum(values: List(a), zero_value: a) {
+  use data <- decode.new_primitive_decoder("Enum")
+  case list.find(values, ffi_compare(_, data)) {
+    Ok(value) -> Ok(value)
+    Error(_) -> Error(zero_value)
+  }
 }
 // Ad maiorem Dei gloriam
