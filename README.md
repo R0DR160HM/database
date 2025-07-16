@@ -8,57 +8,81 @@ A BEAM-native database that leverages on the power of DETS
 ```sh
 gleam add database
 ```
-```gleam
-import database
-import gleam/option
-import gleam/dynamic/decode
 
-type Music {
-  Music(name: String, release_year: Int)
+```gleam
+
+import database
+import gleam/dynamic/decode
+import gleam/erlang/atom
+import gleam/io
+
+type Genre {
+  Rock
+  Metal
+  Pop
+  Electro
+  Movie
 }
 
-fn music_decoder() {
+type Music {
+  Music(name: String, genre: Genre, release_year: Int)
+}
+
+// The decoder teaches the database how to handle your data
+fn table_decoder() {
+  let genre_decoder = database.enum([Rock, Metal, Electro, Pop, Movie], Pop)
+
   use name <- database.field(0, decode.string)
-  use release_year <- database.field(1, decode.int)
-  decode.success(Music(name:, release_year:))
+  use genre <- database.field(1, genre_decoder)
+  use release_year <- database.field(2, decode.int)
+  decode.success(Music(name:, genre:, release_year:))
 }
 
 pub fn main() -> Nil {
-  let assert Ok(table) = database.create_table(
-    name: "musics", 
-    decode_with: music_decoder())
+  let table_name = atom.create("musics")
+  let assert Ok(table) = database.create_table(table_name, table_decoder())
 
   // All interactions with the table happen within a transaction
-  let assert Ok(castemere_id) = database.transaction(table, fn(ref) {
-    let assert Ok(id) = database.insert(ref, Music("The Rains of Castemere", 2019))
+  let assert Ok(castemere_id) = {
+    use transac <- database.transaction(table)
+    let assert Ok(id) =
+      database.insert(transac, Music("The Rains of Castemere", Movie, 2019))
+    // Every insert auto generates a random string ID for the data
     id
-  })
+  }
 
-  // You can do multiple operations within the same transaction, as long as they don't interact with each other
-  let assert Ok(templars_id) = database.transaction(table, fn(ref) {
-    let assert Ok(id) = database.insert(ref, Music("Templars", 2025))
-    let assert Ok(_) = database.insert(ref, Music("Kids", 2009))
-    let assert Ok(Nil) = database.delete(ref, castemere_id)
+  // You can do multiple operations within the same transaction, 
+  // as long as tye don't interact with each other
+  let assert Ok(templars_id) = {
+    use transac <- database.transaction(table)
+    let assert Ok(id) = database.insert(transac, Music("Templars", Rock, 2025))
+    let assert Ok(_) = database.insert(transac, Music("Kids", Electro, 2009))
+    let assert Ok(Nil) = database.delete(transac, castemere_id)
     id
-  })
+  }
 
-  // You can find elements by their primary_key...
-  let _ = database.transaction(table, fn(ref) {
-    let assert option.None = database.find(ref, castemere_id)
-    let assert option.Some(Music("Templars", 2025)) = database.find(ref, templars_id)
-  })
+  // You can find elements by their id...
+  let _ = {
+    use transac <- database.transaction(table)
+    // Already deleted
+    assert Error(database.NotFound) == database.find(transac, castemere_id)
+    // Still exists
+    assert Ok(Music("Templars", Rock, 2025)) == database.find(transac, templars_id)
+  }
 
   // [...] or by complex queries
-  let assert Ok([_, _]) = select_musics_after_2000(table)
-}
-
-fn select_musics_after_2000(table: database.Table(Music)) {
-  use transaction <- database.transaction(table)
-  use value <- database.select(transaction)
-  case value {
-    #(_id, Music(_name, year)) if year > 2000 -> database.Continue(value)
-    _ -> database.Skip
+  let assert Ok([_, _]) = {
+    use transac <- database.transaction(table)
+    use value <- database.select(transac)
+    case value {
+      // Selects only musics released after 2000
+      #(_id, Music(_name, _genre, year)) if year > 2000 ->
+        database.Continue(value)
+      _ -> database.Skip
+    }
   }
+
+  io.println("And that's it, folks!")
 }
 
 ```

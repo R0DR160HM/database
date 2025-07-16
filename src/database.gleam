@@ -17,7 +17,6 @@ import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist
 import gleam/list
-import gleam/option
 
 // BEAM interaction
 
@@ -69,10 +68,8 @@ fn file_delete(path: charlist.Charlist) -> a
 @external(erlang, "database_ffi", "compare")
 fn ffi_compare(a: a, b: b) -> Bool
 
-// Lying about the type ouput here is the only
-// way to ensure type-safety on the `select` function
-@external(erlang, "erlang", "binary_to_atom")
-fn erlang_binary_to_atom(value: String) -> SelectOption(a)
+@external(erlang, "database_ffi", "skip")
+fn ffi_skip() -> SelectOption(a)
 
 // Type-safe API
 
@@ -97,6 +94,16 @@ pub type FileError {
   UnableToClose
 }
 
+/// Error returned by the `find` function.
+pub type FindError {
+  /// No data with the given ID was found.
+  NotFound
+
+  /// The data was found, but it could not be decoded with
+  /// the provided decoder.
+  UnableToDecode(List(decode.DecodeError))
+}
+
 /// Creats a table.
 ///
 /// If no .dets file exists for the provided definition, creates one.
@@ -107,31 +114,30 @@ pub type FileError {
 ///
 /// ```gleam
 /// pub fn start_database() {
-///   let decoder = {
+///   let table_decoder = {
 ///     use name <- database.field(0, decode.string)
 ///     use animal <- database.field(1, my_animal_decoder)
 ///     decode.success(Pet(name:, animal:))
 ///   }
-///   database.create_table(name: "pets", decode_with: decoder)
+///   let table_name = atom.create("pets")
+///   database.create_table(name: table_name, decode_with: table_decoder)
 ///   // -> Ok(Table(Pet))
 /// }
 /// ```
 ///
 pub fn create_table(
-  name name: String,
+  name name: Atom,
   decode_with decoder: decode.Decoder(a),
 ) -> Result(Table(a), FileError) {
-  let name_atom = atom.create(name)
-
-  let path = charlist.from_string(name <> ".dets")
+  let path = charlist.from_string(atom.to_string(name) <> ".dets")
 
   let att = [File(path), Type(Set), Keypos(1)]
 
-  case dets_open_file(name_atom, att) {
+  case dets_open_file(name, att) {
     Ok(tab) -> {
       case dets_close(tab) {
         Error(_) -> Error(UnableToClose)
-        _ -> Ok(Table(name_atom, att, path, decoder))
+        _ -> Ok(Table(name, att, path, decoder))
       }
     }
     Error(_) -> Error(UnableToOpen)
@@ -150,8 +156,8 @@ pub fn create_table(
 /// pub fn is_pet_registered(table: Table(Pet), pet_id: String) {
 ///   use ref <- database.transaction(table)
 ///   case database.find(ref, pet_id) {
-///     Some(_) -> True
-///     None -> False
+///     Ok(_) -> True
+///     Error(_) -> False
 ///   }
 /// }
 /// ```
@@ -242,20 +248,20 @@ pub fn delete(transac: Transaction(a), id: String) {
 ///   use ref <- database.transaction(table)
 ///   let resp = database.find(ref, known_pluto_id)
 ///   case resp {
-///     None -> Error(PlutoNotFoundBlameTheAstronomers)
-///     Some(pluto) -> Ok(play_with(pluto))
+///     Error(_) -> Error(PlutoNotFoundBlameTheAstronomers)
+///     Ok(pluto) -> Ok(play_with(pluto))
 ///   }
 /// }
 /// ```
 ///
-pub fn find(transac: Transaction(a), id: String) -> option.Option(a) {
+pub fn find(transac: Transaction(a), id: String) -> Result(a, FindError) {
   case dets_lookup(transac.ref, id) {
     [#(_, resp)] ->
       case decode.run(resp, transac.decoder) {
-        Ok(val) -> option.Some(val)
-        _ -> option.None
+        Ok(val) -> Ok(val)
+        Error(errors) -> Error(UnableToDecode(errors))
       }
-    _ -> option.None
+    _ -> Error(NotFound)
   }
 }
 
@@ -320,16 +326,15 @@ pub fn select(
   transac: Transaction(a),
   select_fn: fn(#(String, a)) -> SelectOption(b),
 ) -> List(b) {
-  let continue = erlang_binary_to_atom("continue")
   let new_fn = fn(tab_value) {
     let #(id, dyn_value) = tab_value
     case decode.run(dyn_value, transac.decoder) {
       Ok(value) ->
         case select_fn(#(id, value)) {
-          Skip -> continue
+          Skip -> ffi_skip()
           res -> res
         }
-      _ -> continue
+      _ -> ffi_skip()
     }
   }
   dets_traverse(transac.ref, new_fn)
@@ -378,19 +383,18 @@ pub fn migrate(
   migration: fn(dynamic.Dynamic) -> MigrateOptions(a),
 ) -> Result(Nil, FileError) {
   use transac <- transaction(table)
-  let continue = erlang_binary_to_atom("continue")
   let func = fn(tab_value) {
     let #(id, dyn_value) = tab_value
     case migration(dyn_value) {
       Update(new_value) -> {
         let _ = dets_insert(transac.ref, #(id, new_value))
-        continue
+        ffi_skip()
       }
       Delete -> {
         let _ = dets_delete(transac.ref, id)
-        continue
+        ffi_skip()
       }
-      Keep -> continue
+      Keep -> ffi_skip()
     }
   }
   let _ = dets_traverse(transac.ref, func)

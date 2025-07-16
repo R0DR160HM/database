@@ -1,5 +1,6 @@
 *.beam
 *.ez
 *.dets
+src/demo.gleam
 /build
 erl_crash.dump

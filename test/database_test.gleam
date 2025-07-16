@@ -2,8 +2,8 @@ import database
 import gleam/bit_array
 import gleam/crypto
 import gleam/dynamic/decode
+import gleam/erlang/atom
 import gleam/int
-import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 
@@ -21,9 +21,13 @@ fn decoder() {
   decode.success(Person(name:, age:))
 }
 
+fn name() {
+  atom.create("people")
+}
+
 /// Tests all public functions on their "happy path"
 pub fn full_cicle_test() {
-  let assert Ok(table) = database.create_table("people", decoder())
+  let assert Ok(table) = database.create_table(name(), decoder())
 
   let piastri_id =
     crypto.strong_random_bytes(16) |> bit_array.base64_url_encode(False)
@@ -39,11 +43,11 @@ pub fn full_cicle_test() {
 
   let _ =
     database.transaction(table, fn(ref) {
-      let assert None = database.find(ref, piastri_id)
-      let assert Some(Person("Sebastian Vettel", 87)) =
+      let assert Error(database.NotFound) = database.find(ref, piastri_id)
+      let assert Ok(Person("Sebastian Vettel", 87)) =
         database.find(ref, vettel_id)
       let assert Ok(Nil) = database.delete(ref, vettel_id)
-      let assert None = database.find(ref, vettel_id)
+      let assert Error(database.NotFound) = database.find(ref, vettel_id)
     })
 
   let assert Ok(_) = database.drop_table(table)
@@ -51,16 +55,16 @@ pub fn full_cicle_test() {
 
 pub fn direct_operations_test() {
   let assert Ok(table) =
-    database.create_table(name: "people", decode_with: decoder())
+    database.create_table(name: name(), decode_with: decoder())
   let assert Ok(Ok(mom_id)) =
     database.transaction(table, database.insert(_, Person("Your mom™", 2048)))
-  let assert Ok(Some(Person("Your mom™", 2048))) =
+  let assert Ok(Ok(Person("Your mom™", 2048))) =
     database.transaction(table, database.find(_, mom_id))
   let assert Ok(_) = database.drop_table(table)
 }
 
 pub fn select_test() {
-  let assert Ok(table) = database.create_table("people", decoder())
+  let assert Ok(table) = database.create_table(name(), decoder())
 
   let _ =
     database.transaction(table, fn(ref) {
@@ -95,7 +99,8 @@ pub fn select_test() {
 }
 
 pub fn full_cicle_with_string_test() {
-  let assert Ok(table) = database.create_table("testsss", decode.string)
+  let assert Ok(table) =
+    database.create_table(atom.create("testsss"), decode.string)
 
   let _ = database.transaction(table, database.insert(_, "brbr patapim"))
   let assert Ok([id]) =
@@ -107,18 +112,19 @@ pub fn full_cicle_with_string_test() {
       }
     })
 
-  let assert Ok(option.Some("brbr patapim")) =
+  let assert Ok(Ok("brbr patapim")) =
     database.transaction(table, database.find(_, id))
 
   let assert Ok(Ok(Nil)) = database.transaction(table, database.delete(_, id))
 
-  let assert Ok(option.None) = database.transaction(table, database.find(_, id))
+  let assert Ok(Error(database.NotFound)) =
+    database.transaction(table, database.find(_, id))
 
   let assert Ok(Nil) = database.drop_table(table)
 }
 
 pub fn migration_test() {
-  let assert Ok(table) = database.create_table("people", decode.string)
+  let assert Ok(table) = database.create_table(name(), decode.string)
   let assert Ok(_) = {
     use transac <- database.transaction(table)
     let _ = database.insert(transac, "Aristotle, 22")
@@ -127,7 +133,7 @@ pub fn migration_test() {
     let _ = database.insert(transac, "Aquinas, the GOAT")
   }
 
-  let assert Ok(table) = database.create_table("people", decoder())
+  let assert Ok(table) = database.create_table(name(), decoder())
 
   let string_to_person_decoder = {
     use decoded_string <- decode.then(decode.string)
@@ -165,7 +171,7 @@ pub fn migration_test() {
 }
 
 pub fn update_test() {
-  let assert Ok(table) = database.create_table("people", decoder())
+  let assert Ok(table) = database.create_table(name(), decoder())
   let assert Ok(Ok(id)) = {
     use transac <- database.transaction(table)
     database.insert(transac, Person("Rony Weasley", 11))
@@ -180,7 +186,7 @@ pub fn update_test() {
     database.update(transac, "wrong_id", Person("Gina Weasley", 10))
   }
 
-  let assert Ok(Some(Person("Percy Weasley", 14))) = {
+  let assert Ok(Ok(Person("Percy Weasley", 14))) = {
     use transac <- database.transaction(table)
     database.find(transac, id)
   }
@@ -195,9 +201,13 @@ pub fn update_test() {
 }
 
 pub type Animal {
+  Condor
   Dog
+  Chicken
   Cat
+  Horse
   Parrot
+  Hamster
 }
 
 pub type Pet {
@@ -210,7 +220,7 @@ pub fn enum_test() {
     use animal <- database.field(1, database.enum([Dog, Cat, Parrot], Dog))
     decode.success(Pet(name:, animal:))
   }
-  let assert Ok(table) = database.create_table("pets", pet_decoder)
+  let assert Ok(table) = database.create_table(name(), pet_decoder)
 
   let assert Ok([dog_id, cat_id, parrot_id]) = {
     use transac <- database.transaction(table)
@@ -222,9 +232,9 @@ pub fn enum_test() {
 
   let assert Ok(_) = {
     use transac <- database.transaction(table)
-    let assert Some(Pet("Bob", Dog)) = database.find(transac, dog_id)
-    let assert Some(Pet("Alice", Cat)) = database.find(transac, cat_id)
-    let assert Some(Pet("Charlie", Parrot)) = database.find(transac, parrot_id)
+    let assert Ok(Pet("Bob", Dog)) = database.find(transac, dog_id)
+    let assert Ok(Pet("Alice", Cat)) = database.find(transac, cat_id)
+    let assert Ok(Pet("Charlie", Parrot)) = database.find(transac, parrot_id)
   }
 
   let assert Ok(Nil) = database.drop_table(table)
